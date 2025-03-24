@@ -26,6 +26,7 @@ class _SourceDetection(Block):
         min_separation: float = None,
         min_area: float = 0,
         minor_length: float = 0,
+        saturation: float = None,
         name: str = None,
     ):
         """Base class for sources detection.
@@ -56,6 +57,7 @@ class _SourceDetection(Block):
         self.threshold = threshold
         self.min_area = min_area
         self.minor_length = minor_length
+        self.saturation = saturation
 
     def clean(self, sources):
         peaks = np.array([s.peak for s in sources])
@@ -81,6 +83,19 @@ class _SourceDetection(Block):
                         for j in idxs[idxs > i]:
                             final_sources[int(j)].keep = False
 
+                _sources = _sources[np.array([s.keep for s in final_sources])]
+            
+            if self.saturation:
+                final_sources = _sources.copy()
+
+                for s in final_sources:
+                    s.keep = True
+
+                for i, s in enumerate(final_sources):
+                    if final_sources[i].keep:
+                        if s.peak > self.saturation:
+                            final_sources[i].keep = False
+                
                 _sources = _sources[np.array([s.keep for s in final_sources])]
 
             for i, s in enumerate(_sources):

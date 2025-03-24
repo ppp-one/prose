@@ -17,6 +17,7 @@ __all__ = [
     "Get",
     "Calibration",
     "CleanBadPixels",
+    "CleanBadPixelsPeter",
     "Del",
     "GetFluxes",
     "WriteTo",
@@ -456,6 +457,114 @@ class CleanBadPixels(Block):
         image.data = self.clean(image.data.copy())
 
 
+class CleanBadPixelsPeter(Block):
+    def __init__(
+        self,
+        bad_pixels_map=None,
+        darks=None,
+        flats=None,
+        bias=None,
+        min_flat=0.6,
+        std_factor_upper = 5,
+        std_factor_lower = 3,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+        assert (
+            darks is not None or bad_pixels_map is not None
+        ), "bad_pixels_map or darks must be specified"
+        if darks is not None:
+            info("building bad pixels map")
+
+            if bias is not None:
+                info("building master bias for bad pixels map")
+                _bias = [FITSImage(b).data for b in bias]
+                master_bias = np.median(_bias, axis=0)
+                info("master bias built")
+                info(f"master bias shape: {master_bias.shape}, master bias min: {np.min(master_bias)}, "
+                    f"master bias max: {np.max(master_bias)}, master bias median: {np.median(master_bias)}, "
+                    f"master bias mean: {np.mean(master_bias)}, master bias std: {np.std(master_bias)}")
+
+            _darks = []
+            info("building master dark for bad pixels map")
+            for file in darks:
+                _dark = FITSImage(file)
+                _dark_exptime = _dark.header["EXPTIME"]
+                _dark_data = _dark.data
+                if bias is not None:
+                    _dark_data = _dark_data - master_bias
+                _dark_data = _dark_data / _dark_exptime
+                _darks.append(_dark_data)
+            
+            master_dark = np.median(_darks, axis=0)
+            info("master dark built")
+            info(f"master dark shape: {master_dark.shape}, master dark min: {np.min(master_dark)}, "
+                f"master dark max: {np.max(master_dark)}, master dark median: {np.median(master_dark)}, "
+                f"master dark mean: {np.mean(master_dark)}, master dark std: {np.std(master_dark)}")
+
+            theshold = np.std(master_dark)
+            median = np.median(master_dark)
+
+            hots = master_dark > median + std_factor_upper * theshold
+            info(f"number of hot pixels: {np.sum(hots)}, percentage: {np.sum(hots) / master_dark.size * 100}%")
+            deads = master_dark < median - std_factor_lower * theshold
+            info(f"number of dead pixels: {np.sum(deads)}, percentage: {np.sum(deads) / master_dark.size * 100}%")
+
+            self.bad_pixels = np.where(hots | deads)
+            self.bad_pixels_map = np.zeros_like(master_dark)
+
+            # if flats is not None:
+            #     _flats = []
+            #     for flat in flats:
+            #         data = self.loader(flat).data
+            #         _flats.append(data / np.mean(data))
+            #     master_flat = easy_median(_flats)
+            #     master_flat = self.clean(master_flat)
+            #     bad_flats = np.where(master_flat < min_flat)
+            #     if len(bad_flats) == 2:
+            #         self.bad_pixels = (
+            #             np.hstack([self.bad_pixels[0], bad_flats[0]]),
+            #             np.hstack([self.bad_pixels[1], bad_flats[1]]),
+            #         )
+
+            self.bad_pixels_map[self.bad_pixels] = 1
+
+        elif bad_pixels_map is not None:
+            if isinstance(bad_pixels_map, (str, Path)):
+                bad_pixels_map = Image(bad_pixels_map).data
+            elif isinstance(bad_pixels_map, Image):
+                bad_pixels_map = bad_pixels_map.data
+            else:
+                bad_pixels_map = bad_pixels_map
+
+            self.bad_pixels_map = bad_pixels_map
+            self.bad_pixels = np.where(bad_pixels_map == 1)
+
+    def clean(self, data):
+        data[self.bad_pixels] = np.nan
+        data[data < 0] = np.nan
+        nans = np.array(np.where(np.isnan(data))).T
+        padded_data = np.pad(data.copy(), (1, 1), constant_values=np.nan)
+
+        for i, j in nans + 1:
+            mean = np.nanmean(
+                [
+                    padded_data[i, j - 1],
+                    padded_data[i, j + 1],
+                    padded_data[i - 1, j],
+                    padded_data[i + 1, j],
+                ]
+            )
+            padded_data[i, j] = mean
+            data[i - 1, j - 1] = mean
+
+        return data
+
+    def run(self, image):
+        image.data = self.clean(image.data.copy())
+
+
 class Del(Block):
     def __init__(self, *names, name="del"):
         """Remove a property from an Image
@@ -620,8 +729,8 @@ class WriteTo(Block):
 
     def run(self, image):
         self.destination.mkdir(exist_ok=True, parents=True)
-
-        new_hdu = fits.PrimaryHDU(image.data)
+        
+        new_hdu = fits.PrimaryHDU(image.data.astype(np.uint16))
         new_hdu.header = image.header
 
         if self.imtype is not None:

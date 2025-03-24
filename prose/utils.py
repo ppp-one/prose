@@ -12,6 +12,10 @@ from astropy.time import Time
 from astropy.visualization import ZScaleInterval
 from scipy import ndimage
 
+from typing import Optional, Tuple, Union
+from astropy.units import Quantity
+
+
 earth2sun = (c.R_earth / c.R_sun).value
 
 
@@ -366,23 +370,58 @@ def check_skycoord(skycoord):
 
     return skycoord
 
-
-def gaia_query(center, fov, *args, limit=10000, circular=True):
+def gaia_query(
+    center: Union[Tuple[float, float], SkyCoord],
+    fov: Union[float, Quantity],
+    *args,
+    limit: int = 100000,
+    circular: bool = True,
+    tmass: bool = False,
+    dateobs: Optional[datetime] = None,
+) -> np.ndarray:
     """
-    https://gea.esac.esa.int/archive/documentation/GEDR3/Gaia_archive/chap_datamodel/sec_dm_main_tables/ssec_dm_gaia_source.html
-    """
+    Query the Gaia archive to retrieve the RA-DEC coordinates of stars within a given field-of-view (FOV) centered on a given sky position.
 
+    Parameters
+    ----------
+    center : tuple or astropy.coordinates.SkyCoord
+        The sky coordinates of the center of the FOV. If a tuple is given, it should contain the RA and DEC in degrees.
+    fov : float or astropy.units.Quantity
+        The field-of-view of the FOV in degrees. If a float is given, it is assumed to be in degrees.
+    limit : int, optional
+        The maximum number of sources to retrieve from the Gaia archive. By default, it is set to 10000.
+    circular : bool, optional
+        Whether to perform a circular or a rectangular query. By default, it is set to True.
+    tmass : bool, optional
+        Whether to retrieve the 2MASS J magnitudes catelog. By default, it is set to False.
+    dateobs : datetime.datetime, optional
+        The date of the observation. If given, the proper motions of the sources will be taken into account. By default, it is set to None.
+
+    Returns
+    -------
+    np.ndarray
+        An array of shape (n, 2) containing the RA-DEC coordinates of the retrieved sources in degrees.
+
+    Raises
+    ------
+    ImportError
+        If the astroquery package is not installed.
+
+    Examples
+    --------
+    >>> from astropy.coordinates import SkyCoord
+    >>> from twirl import gaia_radecs
+    >>> center = SkyCoord(ra=10.68458, dec=41.26917, unit='deg')
+    >>> fov = 0.1
+    >>> radecs = gaia_radecs(center, fov)
+    """
     from astroquery.gaia import Gaia
 
     if isinstance(center, SkyCoord):
-        ra = center.ra.to(u.deg).value
-        dec = center.dec.to(u.deg).value
-    elif isinstance(center, (tuple, list)):
+        ra = center.ra.deg
+        dec = center.dec.deg
+    else:
         ra, dec = center
-        if isinstance(ra, u.Quantity):
-            ra = ra.to(u.deg).value
-        if isinstance(dec, u.Quantity):
-            dec = dec.to(u.deg).value
 
     if not isinstance(fov, u.Quantity):
         fov = fov * u.deg
@@ -392,27 +431,74 @@ def gaia_query(center, fov, *args, limit=10000, circular=True):
     else:
         ra_fov = dec_fov = fov.to(u.deg).value
 
-    radius = np.min([ra_fov, dec_fov]) / 2
+    radius = np.max([ra_fov, dec_fov]) / 2
 
     fields = ",".join(args) if isinstance(args, (tuple, list)) else args
 
-    if circular:
+    if circular and not tmass:
         job = Gaia.launch_job(
-            f"select top {limit} {fields} from gaiadr2.gaia_source where "
-            "1=CONTAINS("
-            f"POINT('ICRS', {ra}, {dec}), "
-            f"CIRCLE('ICRS',ra, dec, {radius}))"
-            "order by phot_g_mean_mag"
+            f"""
+            SELECT top {limit} {fields}
+            FROM gaiadr2.gaia_source AS gaia
+            WHERE 1=CONTAINS(
+                POINT('ICRS', {ra}, {dec}), 
+                CIRCLE('ICRS', gaia.ra, gaia.dec, {radius}))
+            ORDER BY gaia.phot_rp_mean_flux DESC
+            """
+        )
+    elif circular and tmass:
+        job = Gaia.launch_job(
+            f"""
+            SELECT top {limit} {fields}
+            FROM gaiadr2.gaia_source AS gaia
+            INNER JOIN gaiadr2.tmass_best_neighbour AS tmass_match ON tmass_match.source_id = gaia.source_id
+            INNER JOIN gaiadr1.tmass_original_valid AS tmass ON tmass.tmass_oid = tmass_match.tmass_oid
+            WHERE 1=CONTAINS(
+                POINT('ICRS', {ra}, {dec}), 
+                CIRCLE('ICRS', gaia.ra, gaia.dec, {radius}))
+            ORDER BY tmass.j_m
+            """
+        )
+    elif not circular and tmass:
+        job = Gaia.launch_job(
+            f"""
+            SELECT top {limit} {fields}
+            FROM gaiadr2.gaia_source AS gaia
+            INNER JOIN gaiadr2.tmass_best_neighbour AS tmass_match ON tmass_match.source_id = gaia.source_id
+            INNER JOIN gaiadr1.tmass_original_valid AS tmass ON tmass.tmass_oid = tmass_match.tmass_oid
+            WHERE gaia.ra BETWEEN {ra-ra_fov/2} AND {ra+ra_fov/2} AND
+            gaia.dec BETWEEN {dec-dec_fov/2} AND {dec+dec_fov/2}
+            ORDER BY tmass.j_m
+            """
         )
     else:
         job = Gaia.launch_job(
-            f"select top {limit} {fields} from gaiadr2.gaia_source where "
-            f"ra BETWEEN {ra-ra_fov/2} AND {ra+ra_fov/2} AND "
-            f"dec BETWEEN {dec-dec_fov/2} AND {dec+dec_fov/2} "
-            "order by phot_g_mean_mag"
+            f"""
+            SELECT top {limit} {fields}
+            FROM gaiadr2.gaia_source AS gaia
+            WHERE gaia.ra BETWEEN {ra-ra_fov/2} AND {ra+ra_fov/2} AND
+            gaia.dec BETWEEN {dec-dec_fov/2} AND {dec+dec_fov/2}
+            ORDER BY gaia.phot_rp_mean_flux DESC
+            """
         )
 
-    return job.get_results()
+    table = job.get_results()
+
+    # add proper motion to ra and dec
+    if dateobs is not None:
+        # calculate fractional year
+        dateobs = dateobs.year + (dateobs.timetuple().tm_yday - 1) / 365.25  # type: ignore
+
+        years = dateobs - 2015.5  # type: ignore
+        table["ra"] += years * table["pmra"] / 1000 / 3600
+        table["dec"] += years * table["pmdec"] / 1000 / 3600
+
+    if tmass:
+        table.remove_rows(np.isnan(table["j_m"]))
+        return table
+    else:
+        table.remove_rows(np.isnan(table["phot_rp_mean_flux"]))
+        return table
 
 
 def full_class_name(o):
