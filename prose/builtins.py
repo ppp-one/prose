@@ -39,7 +39,7 @@ default = dict(
     read_noise=9,  # A
     gain=1,  # e-/ADU
     altitude=2000,  # meters
-    diameter=100,  # meters
+    diameter=1,  # meters
     pixel_scale=None,  # arcsec/pixel
     latlong=(None, None),
     saturation=55000,  # ADUs
@@ -156,6 +156,62 @@ spirit = dict(
     read_noise=17,
     gain=5,
     camera_name="PIRT1280SciCam2",
+)
+
+# hpp
+# altitude: 2000
+# bjd_scale: utc
+# camera_name: HPP-ETHZ
+# dec_unit: deg
+# diameter: 50
+# gain: 1
+# hdu: 0
+# jd_scale: utc
+# keyword_airmass: AIRMASS
+# keyword_bias_images: bias
+# keyword_bjd: BJD
+# keyword_dark_images: dark
+# keyword_dec: DEC
+# keyword_exposure_time: EXPTIME
+# keyword_filter: FILTER
+# keyword_flat_images: flat
+# keyword_flip: PIERSIDE
+# keyword_fwhm: FWHM
+# keyword_image_type: IMAGETYP
+# keyword_jd: JD
+# keyword_light_images: light
+# keyword_object: OBJECT
+# keyword_observation_date: DATE-OBS
+# keyword_observation_time: null
+# keyword_ra: RA
+# keyword_seeing: SEEING
+# keyword_telescope: TELESCOP
+# latlong: !!python/tuple
+# - 47.40761111111111
+# - 8.510944444444444
+# mjd: 0
+# name: HPP-ETHZ
+# names: HPP-ETHZ
+# pixel_scale: 0.89815
+# ra_unit: deg
+# read_noise: 3
+# saturation: 64000
+# trimming: !!python/tuple
+# - 0
+# - 0
+
+hpp = dict(
+    default,
+    name="HPP-ETHZ",
+    names=("HPP-ETHZ",),
+    keyword_telescope="TELESCOP",
+    trimming=(0, 0),  # pixels along y/x
+    read_noise=3,  # in ADU
+    gain=1,  # in e-/ADU
+    altitude=600,  # in meters
+    diameter=0.5,  # in meters
+    pixel_scale=0.89815,  # arcsec/pixel
+    latlong=(47.40761111111111, 8.510944444444444),  # (latitude, longitude) in degree
 )
 
 built_in_telescopes = {

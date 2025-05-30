@@ -18,7 +18,14 @@ __all__ = ["GaiaCatalog", "TESSCatalog"]
 
 
 def image_gaia_query(
-    image, limit=3000, correct_pm=True, wcs=True, circular=True, fov=None, tmass=False, dateobs=None
+    image,
+    limit=3000,
+    correct_pm=True,
+    wcs=True,
+    circular=True,
+    fov=None,
+    tmass=False,
+    dateobs=None,
 ):
     if wcs:
         center = image.wcs.pixel_to_world(*(np.array(image.shape) / 2)[::-1])
@@ -28,7 +35,9 @@ def image_gaia_query(
     if fov is None:
         fov = image.fov
 
-    table = gaia_query(center, fov, "*", limit=limit, circular=circular, tmass=tmass, dateobs=dateobs)
+    table = gaia_query(
+        center, fov, "*", limit=limit, circular=circular, tmass=tmass, dateobs=dateobs
+    )
 
     if correct_pm:
         skycoord = SkyCoord(
@@ -198,7 +207,12 @@ class PlateSolve(Block):
 
         if self.reference is None:
             table = image_gaia_query(
-                image, wcs=False, circular=True, fov=image.fov.max() * self.field, tmass=self.tmass, dateobs=image.date
+                image,
+                wcs=False,
+                circular=True,
+                fov=image.fov.max() * self.field,
+                tmass=self.tmass,
+                dateobs=image.date,
             ).to_pandas()
             gaias = np.array([table.ra, table.dec]).T
             gaias = gaias[~np.any(np.isnan(gaias), 1)]
