@@ -227,5 +227,6 @@ built_in_telescopes = {
         saintex,
         liverpool,
         spirit,
+        hpp
     )
 }
