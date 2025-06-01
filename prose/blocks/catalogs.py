@@ -286,7 +286,6 @@ class GaiaCatalog(_CatalogBlock):
         table = image_gaia_query(
             image, correct_pm=self.correct_pm, limit=500000, circular=True, fov=max_fov
         )
-        print(table)
         table.rename_column("designation", "id")
         return table
 
